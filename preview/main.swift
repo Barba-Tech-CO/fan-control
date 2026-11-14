@@ -6,7 +6,7 @@ MainActor.assumeIsolated {
   let m = Model()
   let a = CommandLine.arguments
   m.choice = Choice(rawValue: (a.count > 2 ? a[2] : "hold").capitalized) ?? .hold
-  m.helperUp = a.count > 3 ? a[3] == "1" : true
+  m.helperUp = a.count > 3 ? a[3] == "1" : true; if a.count > 4 { m.error = "Install the app root-owned first: sudo cp -R FanControl.app /Applications/ && sudo chown -R root:wheel /Applications/FanControl.app" }
   m.temp = 83
   m.rpm = 3400
   let now = Date()
