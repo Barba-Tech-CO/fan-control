@@ -104,13 +104,6 @@ final class Model: ObservableObject {
 
   /// Registers the bundled daemon; macOS asks the user to allow it in Login Items.
   func installHelper() {
-    // The helper runs as root from inside this bundle, so the bundle must not be editable by the user.
-    let root = Bundle.main.bundlePath
-    let guarded = [root, root + "/Contents", root + "/Contents/MacOS", root + "/Contents/MacOS/fanctld", root + "/Contents/Library/LaunchDaemons/" + daemonPlist]
-    if guarded.contains(where: FileManager.default.isWritableFile(atPath:)) {
-      error = "Install the app root-owned first: sudo cp -R FanControl.app /Applications/ && sudo chown -R root:wheel /Applications/FanControl.app — then open it from /Applications."
-      return
-    }
     do { try service.register() } catch { self.error = error.localizedDescription }
     if service.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
     synced = false
