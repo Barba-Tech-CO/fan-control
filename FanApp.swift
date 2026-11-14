@@ -1,9 +1,10 @@
 import SwiftUI
 import Charts
 import Foundation
+import ServiceManagement
 
 let socketPath = "/var/run/fanctl.sock"
-let daemonLabel = "com.local.fanctld"
+let daemonPlist = "com.local.fanctld.plist"
 
 enum Choice: String, CaseIterable, Identifiable {
   case auto = "Auto", hold = "Hold", fixed = "Manual"
@@ -39,6 +40,7 @@ final class Model: ObservableObject {
   @Published var hi: Double = 85
   @Published var fixedRpm: Float = 3000
   @Published var error: String?
+  @Published var needsApproval = false
   @Published var history: [Sample] = []
 
   let fanMin: Float, fanMax: Float
@@ -46,6 +48,7 @@ final class Model: ObservableObject {
   private let sensor = TempSensor()
   private var synced = false
   private var timer: Timer?
+  private let service = SMAppService.daemon(plistName: daemonPlist)
 
   init() {
     fanMin = smc?.float("F0Mn") ?? 1000
@@ -63,6 +66,7 @@ final class Model: ObservableObject {
 
   func refresh() {
     temp = sensor.maxC()
+    needsApproval = service.status == .requiresApproval
     rpm = smc?.float("F0Ac") ?? 0
     if let t = temp {
       history.append(Sample(t: Date(), temp: t, rpm: Double(rpm)))
@@ -98,18 +102,26 @@ final class Model: ObservableObject {
     }
   }
 
+  /// Registers the bundled daemon; macOS asks the user to allow it in Login Items.
   func installHelper() {
-    guard let res = Bundle.main.resourcePath else { return }
-    let bin = "/Library/PrivilegedHelperTools/com.local.fanctld", plist = "/Library/LaunchDaemons/\(daemonLabel).plist"
-    let sh = "launchctl bootout system/\(daemonLabel) 2>/dev/null; mkdir -p /Library/PrivilegedHelperTools"
-      + " && install -o root -g wheel -m 755 '\(res)/fanctld' \(bin)"
-      + " && install -o root -g wheel -m 644 '\(res)/\(daemonLabel).plist' \(plist)"
-      + " && rm -f /usr/local/libexec/fanctld && launchctl bootstrap system \(plist)"
-    var err: NSDictionary?
-    NSAppleScript(source: "do shell script \"\(sh)\" with administrator privileges")?.executeAndReturnError(&err)
-    error = err?[NSAppleScript.errorMessage] as? String
+    // The helper runs as root from inside this bundle, so the bundle must not be editable by the user.
+    let root = Bundle.main.bundlePath
+    let guarded = [root, root + "/Contents", root + "/Contents/MacOS", root + "/Contents/MacOS/fanctld", root + "/Contents/Library/LaunchDaemons/" + daemonPlist]
+    if guarded.contains(where: FileManager.default.isWritableFile(atPath:)) {
+      error = "Install the app root-owned first: sudo cp -R FanControl.app /Applications/ && sudo chown -R root:wheel /Applications/FanControl.app — then open it from /Applications."
+      return
+    }
+    do { try service.register() } catch { self.error = error.localizedDescription }
+    if service.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
     synced = false
     refresh()
+  }
+
+  func removeHelper() {
+    Task {
+      do { try await service.unregister() } catch { self.error = error.localizedDescription }
+      refresh()
+    }
   }
 }
 
@@ -235,14 +247,19 @@ struct ControlPanel: View {
         .disabled(!m.helperUp).opacity(m.helperUp ? 1 : 0.4)
 
         if !m.helperUp {
-          Text("Controls unlock after a one-time install of a small background helper. Your admin password is asked once.")
-            .font(.callout).foregroundStyle(Theme.dim)
+          Text(m.needsApproval
+               ? "Almost there: allow Fan Control in System Settings → General → Login Items & Extensions → Allow in the Background."
+               : "Controls unlock after you allow a small background helper. macOS asks for your approval once.")
+            .font(.callout).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
           Button { m.installHelper() } label: {
-            Text("Install helper").font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).padding(.vertical, 10)
+            Text(m.needsApproval ? "Open System Settings" : "Install helper").font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).padding(.vertical, 10)
               .background(Theme.accent, in: Capsule()).foregroundStyle(Color.black.opacity(0.85))
           }.buttonStyle(.plain)
         }
-        if let e = m.error { Text(e).font(.caption).foregroundStyle(Theme.hot) }
+        if m.helperUp {
+          Button("Remove helper") { m.removeHelper() }.buttonStyle(.plain).font(.caption).foregroundStyle(Theme.dim)
+        }
+        if let e = m.error { Text(e).font(.caption).foregroundStyle(Theme.hot).fixedSize(horizontal: false, vertical: true) }
       }
     }
   }
