@@ -3,12 +3,13 @@
 set -e
 [ "$(id -u)" = 0 ] || { echo "run with sudo"; exit 1; }
 R="$(cd "$(dirname "$0")" && pwd)/FanControl.app/Contents/Resources"
-mkdir -p /usr/local/libexec
-cp "$R/fanctld" /usr/local/libexec/fanctld
-chmod 755 /usr/local/libexec/fanctld
-cp "$R/com.local.fanctld.plist" /Library/LaunchDaemons/
-chown root:wheel /Library/LaunchDaemons/com.local.fanctld.plist
+BIN=/Library/PrivilegedHelperTools/com.local.fanctld
+PLIST=/Library/LaunchDaemons/com.local.fanctld.plist
 launchctl bootout system/com.local.fanctld 2>/dev/null || true
-launchctl bootstrap system /Library/LaunchDaemons/com.local.fanctld.plist
+mkdir -p /Library/PrivilegedHelperTools
+install -o root -g wheel -m 755 "$R/fanctld" "$BIN"
+install -o root -g wheel -m 644 "$R/com.local.fanctld.plist" "$PLIST"
+rm -f /usr/local/libexec/fanctld   # location used by earlier versions
+launchctl bootstrap system "$PLIST"
 sleep 1
 echo "helper:" "$(echo mode | nc -U /var/run/fanctl.sock)"

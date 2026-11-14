@@ -100,9 +100,11 @@ final class Model: ObservableObject {
 
   func installHelper() {
     guard let res = Bundle.main.resourcePath else { return }
-    let sh = "mkdir -p /usr/local/libexec && cp '\(res)/fanctld' /usr/local/libexec/fanctld && chmod 755 /usr/local/libexec/fanctld"
-      + " && cp '\(res)/\(daemonLabel).plist' /Library/LaunchDaemons/ && chown root:wheel /Library/LaunchDaemons/\(daemonLabel).plist"
-      + " && (launchctl bootout system/\(daemonLabel) 2>/dev/null; launchctl bootstrap system /Library/LaunchDaemons/\(daemonLabel).plist)"
+    let bin = "/Library/PrivilegedHelperTools/com.local.fanctld", plist = "/Library/LaunchDaemons/\(daemonLabel).plist"
+    let sh = "launchctl bootout system/\(daemonLabel) 2>/dev/null; mkdir -p /Library/PrivilegedHelperTools"
+      + " && install -o root -g wheel -m 755 '\(res)/fanctld' \(bin)"
+      + " && install -o root -g wheel -m 644 '\(res)/\(daemonLabel).plist' \(plist)"
+      + " && rm -f /usr/local/libexec/fanctld && launchctl bootstrap system \(plist)"
     var err: NSDictionary?
     NSAppleScript(source: "do shell script \"\(sh)\" with administrator privileges")?.executeAndReturnError(&err)
     error = err?[NSAppleScript.errorMessage] as? String
