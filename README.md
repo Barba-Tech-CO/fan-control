@@ -29,13 +29,13 @@ sudo ./install-helper.sh        # installs the root helper as a launchd service
 
 You can also click **Install helper** inside the app instead of running the script; it asks for your admin password once.
 
-Reading temperature and RPM needs no privileges. Writing the fan speed does, so a small root helper (`fanctld`) is installed to `/usr/local/libexec` with a launch daemon in `/Library/LaunchDaemons`.
+Reading temperature and RPM needs no privileges. Writing the fan speed does, so a small root helper (`fanctld`) is installed to `/Library/PrivilegedHelperTools` with a launch daemon in `/Library/LaunchDaemons`.
 
 To uninstall:
 
 ```sh
 sudo launchctl bootout system/com.local.fanctld
-sudo rm /Library/LaunchDaemons/com.local.fanctld.plist /usr/local/libexec/fanctld
+sudo rm /Library/LaunchDaemons/com.local.fanctld.plist /Library/PrivilegedHelperTools/com.local.fanctld
 ```
 
 ## How it works
@@ -52,7 +52,8 @@ The helper socket accepts one line per connection: `mode`, `auto`, `hold <lo> <h
 
 - The SMC is an undocumented interface. Keys and behavior can change between Mac models and macOS versions; only one machine has been tested.
 - The app is ad-hoc signed, so it runs on the machine that built it but is not notarized for distribution.
-- The helper socket is world-writable so the unprivileged app can send commands. It only accepts fan mode and speed, limited to hardware range.
+- The helper socket is connectable by any local user, but state-changing commands are accepted only from root or the user logged in at the console (checked with `getpeereid`); anyone can read the current mode. Commands only set fan mode and speed, limited to the hardware range.
+- Clients get a 1 s read timeout so a stalled connection cannot block the thermal control loop.
 - Running the fan faster lowers temperature but adds noise. It does not raise performance unless the chip was thermally throttling.
 - Use at your own risk.
 
