@@ -3,3 +3,5 @@ fanctld
 AppIcon.iconset/
 .claude/
 .DS_Store
+*.dmg
+.dmg-stage/
