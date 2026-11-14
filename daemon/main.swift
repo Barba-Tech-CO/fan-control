@@ -1,5 +1,6 @@
 // fanctld — root helper. Applies a fan mode and listens on a unix socket.
 // Commands (one line per connection): mode | auto | hold <lo> <hi> | fixed <rpm>
+// State-changing commands are accepted only from root or the console user (getpeereid).
 import Foundation
 
 let socketPath = ProcessInfo.processInfo.environment["FANCTL_SOCK"] ?? "/var/run/fanctl.sock"
@@ -42,8 +43,15 @@ func control() {
   }
 }
 
-func handle(_ line: String) -> String {
+/// Owner of /dev/console = the user logged in at the Mac (root when nobody is).
+func consoleUID() -> uid_t {
+  var st = stat()
+  return stat("/dev/console", &st) == 0 ? st.st_uid : 0
+}
+
+func handle(_ line: String, authorized: Bool) -> String {
   let p = line.split(separator: " ").map(String.init)
+  if p.first != "mode" && !authorized { return "error unauthorized" }
   switch (p.first, p.count) {
   case ("mode", 1): return describe()
   case ("auto", 1): mode = .auto
@@ -83,10 +91,17 @@ while !stopRequested {
   if poll(&pfd, 1, 1000) > 0, pfd.revents & Int16(POLLIN) != 0 {
     let c = accept(server, nil, nil)
     if c >= 0 {
+      // A silent client must not stall the control loop (and the thermal safety with it).
+      var tv = timeval(tv_sec: 1, tv_usec: 0)
+      setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+      setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+      // Only root and the console user may change the fan; anyone may read the mode.
+      var uid: uid_t = 0, gid: gid_t = 0
+      let authorized = getpeereid(c, &uid, &gid) == 0 && (uid == 0 || uid == consoleUID())
       var buf = [UInt8](repeating: 0, count: 128)
       let n = read(c, &buf, 127)
       let line = n > 0 ? String(decoding: buf[0..<n], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) : ""
-      let reply = handle(line) + "\n"
+      let reply = handle(line, authorized: authorized) + "\n"
       _ = reply.withCString { write(c, $0, strlen($0)) }
       close(c)
     }
